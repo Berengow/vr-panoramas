@@ -1,0 +1,757 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <title>VR Панорамы</title>
+  <style>
+    :root { --carousel-h: 132px; }
+    @media (max-width: 600px) { :root { --carousel-h: 108px; } }
+    html, body { margin: 0; background: #000; }
+
+    /* Экран загрузки */
+    #loader {
+      position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
+      background: radial-gradient(circle at 50% 40%, #1d1a3a, #000 70%);
+      color: #fff; font-family: system-ui, sans-serif; transition: opacity .6s;
+    }
+    #loader.done { opacity: 0; pointer-events: none; }
+    .loader-box { width: min(360px, 80vw); text-align: center; }
+    .loader-logo {
+      width: 72px; height: 72px; margin: 0 auto 18px; border-radius: 50%;
+      border: 3px solid rgba(255,255,255,.15); border-top-color: #fff; animation: spin 1s linear infinite;
+    }
+    .loader-title { font-size: 22px; font-weight: 600; margin-bottom: 18px; }
+    .loader-bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,.15); overflow: hidden; }
+    #loaderFill { height: 100%; width: 0; background: #fff; border-radius: 3px; transition: width .3s; }
+    #loaderText { margin-top: 10px; font-size: 13px; opacity: .7; }
+    #loaderHint { margin-top: 14px; font-size: 13px; opacity: .55; }
+    .loader-msg { font-size: 14px; opacity: .75; margin-bottom: 20px; line-height: 1.4; }
+    .loader-box[hidden], #loaderHint[hidden] { display: none; }
+    .btn {
+      border: 0; border-radius: 20px; padding: 9px 20px; cursor: pointer;
+      background: #fff; color: #000; font: 600 14px system-ui, sans-serif;
+    }
+    .btn:hover { background: #e6e6e6; }
+
+    /* Сообщение об ошибке сверху по центру */
+    #notice {
+      position: fixed; top: 62px; left: 50%; transform: translateX(-50%); z-index: 20;
+      display: flex; align-items: center; gap: 10px; max-width: calc(100vw - 32px); box-sizing: border-box;
+      padding: 10px 10px 10px 16px; border-radius: 12px; background: rgba(20,20,24,.92); color: #fff;
+      font: 14px system-ui, sans-serif; box-shadow: 0 4px 20px rgba(0,0,0,.4);
+    }
+    #notice[hidden], #noticeRetry[hidden] { display: none; }
+    #noticeText { line-height: 1.35; }
+    #notice .btn { flex: 0 0 auto; padding: 7px 14px; }
+    #noticeClose {
+      flex: 0 0 auto; width: 28px; height: 28px; border: 0; border-radius: 50%; cursor: pointer;
+      background: transparent; color: #fff; font-size: 14px; opacity: .7;
+    }
+    #noticeClose:hover { opacity: 1; background: rgba(255,255,255,.1); }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Название текущей панорамы */
+    #hud {
+      position: fixed; left: 12px; top: 12px; z-index: 10; display: flex; align-items: center; gap: 8px;
+      font: 14px system-ui, sans-serif; color: #fff; background: rgba(0,0,0,.55);
+      padding: 7px 12px; border-radius: 18px; pointer-events: none; max-width: calc(100vw - 200px);
+    }
+    #hudTitle { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #hudNum { opacity: .7; white-space: nowrap; }
+    #spinner {
+      width: 12px; height: 12px; border-radius: 50%; flex: 0 0 auto;
+      border: 2px solid rgba(255,255,255,.3); border-top-color: #fff; animation: spin .8s linear infinite;
+    }
+    #spinner[hidden] { display: none; }
+
+    /* Кнопки справа сверху */
+    #controls { position: fixed; right: 12px; top: 12px; z-index: 10; display: flex; gap: 8px; }
+    .ctl {
+      width: 40px; height: 40px; border: 0; border-radius: 50%; cursor: pointer;
+      background: rgba(0,0,0,.55); color: #fff; font-size: 18px; line-height: 40px; padding: 0;
+    }
+    .ctl:hover { background: rgba(0,0,0,.75); }
+    .ctl.off { opacity: .55; }
+    .ctl.small { font-size: 12px; }
+    #hdBtn { font-size: 13px; font-weight: 700; }
+    #hdBtn.on { background: #fff; color: #000; }
+    .ctl[hidden] { display: none; }
+
+    /* Карусель выбора панорам (только ПК и телефон) */
+    #carousel {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+      height: var(--carousel-h); box-sizing: border-box;
+      display: flex; align-items: center; gap: 8px; padding: 10px 8px;
+      background: linear-gradient(to top, rgba(0,0,0,.75), rgba(0,0,0,0));
+      font-family: system-ui, sans-serif;
+    }
+    #track {
+      flex: 1; display: flex; gap: 10px; overflow-x: auto; scroll-behavior: smooth;
+      scrollbar-width: none; padding: 4px 2px;
+    }
+    #track::-webkit-scrollbar { display: none; }
+    .item {
+      flex: 0 0 auto; width: 144px; padding: 0; border: 2px solid transparent; border-radius: 8px;
+      background: #111; color: #fff; cursor: pointer; overflow: hidden; text-align: left;
+      opacity: .75; transition: opacity .2s, border-color .2s, transform .2s;
+    }
+    .item:hover { opacity: 1; }
+    .item.active { opacity: 1; border-color: #fff; transform: translateY(-2px); }
+    .item img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; }
+    .item span {
+      display: block; padding: 4px 6px; font-size: 12px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .arrow {
+      flex: 0 0 auto; width: 36px; height: 36px; border: 0; border-radius: 50%;
+      background: rgba(255,255,255,.2); color: #fff; font-size: 20px; cursor: pointer;
+    }
+    .arrow:hover { background: rgba(255,255,255,.35); }
+    @media (max-width: 600px) {
+      .item { width: 110px; }
+      .arrow { display: none; }
+      #hud { max-width: calc(100vw - 160px); }
+    }
+
+    /* Кнопку VR поднимаем над каруселью */
+    .a-enter-vr, .a-enter-ar { bottom: calc(var(--carousel-h) + 8px) !important; }
+
+    /* На шлеме и в режиме VR интерфейс страницы скрыт */
+    .headset #carousel, .headset .ctl:not(#dlBtn), .in-vr #carousel, .in-vr #controls, .in-vr #hud { display: none; }
+    .headset .a-enter-vr, .headset .a-enter-ar { bottom: 20px !important; }
+  </style>
+</head>
+<body>
+  <div id="loader">
+    <div class="loader-box" id="loaderBox">
+      <div class="loader-logo"></div>
+      <div class="loader-title">VR Панорамы</div>
+      <div class="loader-bar"><div id="loaderFill"></div></div>
+      <div id="loaderText">Загрузка… 0%</div>
+      <div id="loaderHint" hidden>Медленное подключение — загрузка займёт чуть больше времени</div>
+    </div>
+    <div class="loader-box" id="loaderError" hidden>
+      <div class="loader-title">Не удалось загрузить панорамы</div>
+      <div class="loader-msg">Проверьте подключение к интернету и попробуйте ещё раз.</div>
+      <button class="btn" id="loaderRetry">Повторить</button>
+    </div>
+  </div>
+
+  <script src="vendor/aframe.min.js"></script>
+  <script>
+    // Анимации идут через тик сцены: в режиме VR обычный requestAnimationFrame страницы не работает
+    const tweens = new Set();
+    function tween(dur, onUpdate) {
+      const tw = { t0: null, dur, onUpdate };
+      tw.promise = new Promise(r => (tw.resolve = r));
+      tw.cancel = () => { if (tweens.delete(tw)) tw.resolve(false); };
+      tweens.add(tw);
+      return tw;
+    }
+    AFRAME.registerComponent('tweens', {
+      tick(t) {
+        for (const tw of tweens) {
+          if (tw.t0 === null) tw.t0 = t;
+          const k = Math.min(1, (t - tw.t0) / tw.dur);
+          tw.onUpdate(k);
+          if (k >= 1) { tweens.delete(tw); tw.resolve(true); }
+        }
+      }
+    });
+
+    // Плоская табличка с текстом, нарисованным на canvas (стандартный шрифт A-Frame не умеет кириллицу)
+    AFRAME.registerComponent('canvas-text', {
+      schema: {
+        text: { default: '' }, width: { default: 0.5 }, height: { default: 0.1 },
+        fontSize: { default: 40 }, color: { default: '#fff' }, bg: { default: '' }, radius: { default: 18 }
+      },
+      init() {
+        this.canvas = document.createElement('canvas');
+        this.texture = new THREE.CanvasTexture(this.canvas);
+        this.texture.colorSpace = THREE.SRGBColorSpace;
+        this.material = new THREE.MeshBasicMaterial({ map: this.texture, transparent: true, depthWrite: false });
+        this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.material);
+        this.el.setObject3D('mesh', this.mesh);
+      },
+      update() {
+        const d = this.data, ppm = 800;
+        const w = Math.round(d.width * ppm), h = Math.round(d.height * ppm);
+        this.canvas.width = w; this.canvas.height = h;
+        this.mesh.scale.set(d.width, d.height, 1);
+        const ctx = this.canvas.getContext('2d');
+        if (d.bg) {
+          ctx.fillStyle = d.bg;
+          ctx.beginPath();
+          if (ctx.roundRect) ctx.roundRect(0, 0, w, h, d.radius); else ctx.rect(0, 0, w, h);
+          ctx.fill();
+        }
+        ctx.fillStyle = d.color;
+        ctx.font = `600 ${d.fontSize}px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const lines = d.text.split('\n'), lh = d.fontSize * 1.3;
+        lines.forEach((line, i) => {
+          // Слишком длинную строку обрезаем многоточием
+          let s = line;
+          while (s.length > 1 && ctx.measureText(s).width > w - 24) s = s.slice(0, -2) + '…';
+          ctx.fillText(s, w / 2, h / 2 + (i - (lines.length - 1) / 2) * lh);
+        });
+        this.texture.needsUpdate = true;
+      },
+      remove() {
+        this.el.removeObject3D('mesh');
+        this.texture.dispose();
+        this.material.dispose();
+      }
+    });
+
+    // Медленный автоповорот, если никто ничего не трогает
+    window.autoRotateAllowed = () => true;
+    AFRAME.registerComponent('auto-rotate', {
+      schema: { delay: { default: 15000 }, speed: { default: 0.035 } },
+      init() {
+        this.last = performance.now();
+        const reset = () => (this.last = performance.now());
+        for (const e of ['pointerdown', 'pointermove', 'wheel', 'keydown', 'touchstart']) {
+          window.addEventListener(e, reset, { passive: true });
+        }
+      },
+      tick(t, dt) {
+        if (!dt || this.el.sceneEl.is('vr-mode') || !window.autoRotateAllowed()) return;
+        if (performance.now() - this.last < this.data.delay) return;
+        const lc = this.el.components['look-controls'];
+        if (lc && lc.yawObject) lc.yawObject.rotation.y -= this.data.speed * dt / 1000;
+      }
+    });
+  </script>
+
+  <div id="hud"><span id="spinner" hidden></span><span id="hudTitle"></span><span id="hudNum"></span></div>
+
+  <div id="notice" role="alert" hidden>
+    <span id="noticeText"></span>
+    <button class="btn" id="noticeRetry">Повторить</button>
+    <button id="noticeClose" aria-label="Закрыть">✕</button>
+  </div>
+
+  <div id="controls">
+    <button class="ctl" id="hdBtn" aria-label="Высокое качество">HD</button>
+    <button class="ctl" id="gyroBtn" aria-label="Гироскоп" hidden>🧭</button>
+    <button class="ctl" id="fsBtn" aria-label="Во весь экран" hidden>⛶</button>
+    <button class="ctl" id="dlBtn" aria-label="Скачать для работы без интернета" title="Скачать все панорамы для работы без интернета" hidden>⬇</button>
+  </div>
+
+  <div id="carousel">
+    <button class="arrow" id="prevBtn" aria-label="Назад">‹</button>
+    <div id="track"></div>
+    <button class="arrow" id="nextBtn" aria-label="Вперёд">›</button>
+  </div>
+
+  <a-scene id="scene" tweens renderer="colorManagement: true" vr-mode-ui="enabled: true" loading-screen="enabled: false">
+    <a-entity id="cam" camera="fov: 80" look-controls="magicWindowTrackingEnabled: true" auto-rotate position="0 1.6 0">
+      <!-- Название панорамы в VR: появляется после переключения и гаснет -->
+      <a-entity id="toast" canvas-text="width: 1.1; height: 0.16; fontSize: 46; bg: rgba(0,0,0,0.6)"
+                position="0 -0.32 -1.2" visible="false"></a-entity>
+    </a-entity>
+
+    <!-- Контроллеры Quest: луч включается только при открытом меню -->
+    <a-entity id="left" meta-touch-controls="hand: left"
+              raycaster="objects: .vr-btn; enabled: false; showLine: false; far: 6"
+              cursor="rayOrigin: entity; downEvents: triggerdown; upEvents: triggerup"></a-entity>
+    <a-entity id="right" meta-touch-controls="hand: right"
+              raycaster="objects: .vr-btn; enabled: false; showLine: false; far: 6"
+              cursor="rayOrigin: entity; downEvents: triggerdown; upEvents: triggerup"></a-entity>
+
+    <!-- Меню выбора панорам в VR -->
+    <a-entity id="menu" visible="false"></a-entity>
+  </a-scene>
+
+  <script>
+    const isHeadset = /OculusBrowser|Quest|Pico|Wolvic/i.test(navigator.userAgent);
+    const isTouch = matchMedia('(pointer: coarse)').matches;
+    if (isHeadset) document.documentElement.classList.add('headset');
+
+    // Шлему нужно 6144 px по ширине, телефону и ПК достаточно 4096 — файлы вдвое легче.
+    // На ПК и телефоне полное качество включается кнопкой HD
+    let quality = 'mid';
+    try { if (isHeadset || localStorage.getItem('pano-quality') === 'hi') quality = 'hi'; } catch (e) {}
+
+    // Названия панорам по порядку. Файлы лежат в папке panoramas/
+    const PANORAMAS = [
+      'Уютная комната', 'Светлая комната', 'Фотостудия-лофт', 'Неоновая студия', 'Комната с камином',
+      'Интерьер на закате', 'Мастерская художника', 'Новогодняя студия', 'Пустой склад', 'Автомастерская',
+      'Канэри-Уорф, Лондон', 'Набережная Шанхая', 'Закат в Венеции', 'Опушка леса', 'Летний луг',
+    ].map((title, i) => ({
+      title,
+      get src() { return `panoramas/${quality}/pano${i + 1}.webp`; },  // текущее качество
+      low:   `panoramas/low/pano${i + 1}.webp`,         // лёгкая версия для мгновенного показа
+      thumb: `panoramas/thumbs/pano${i + 1}.webp`,
+    }));
+    const N = PANORAMAS.length;
+    const CACHE = 'vr-pano-v2';
+
+    const $ = id => document.getElementById(id);
+    const scene = $('scene'), cam = $('cam'), toast = $('toast'), menu = $('menu');
+    const hands = [$('left'), $('right')];
+    const track = $('track');
+    let index = 0;
+
+    const sceneLoaded = new Promise(r => (scene.hasLoaded ? r() : scene.addEventListener('loaded', r, { once: true })));
+    scene.addEventListener('enter-vr', () => document.body.classList.add('in-vr'));
+    scene.addEventListener('exit-vr', () => { document.body.classList.remove('in-vr'); closeMenu(); });
+
+    /* ---------- Текстуры и небо ---------- */
+    const texCache = new Map();   // путь -> { promise, tex }
+    const loader = new THREE.TextureLoader();
+
+    function loadTexture(src) {
+      let entry = texCache.get(src);
+      if (!entry) {
+        entry = { tex: null };
+        entry.promise = new Promise((resolve, reject) => {
+          loader.load(src, tex => {
+            tex.colorSpace = THREE.SRGBColorSpace;
+            entry.tex = tex;
+            resolve(tex);
+          }, undefined, () => {
+            texCache.delete(src);
+            reject(new Error('Не найден файл ' + src));
+          });
+        });
+        texCache.set(src, entry);
+      }
+      return entry.promise;
+    }
+    const isReady = src => !!(texCache.get(src) || {}).tex;
+
+    // В видеопамяти держим только текущую и следующую панорамы — шлему важно её не переполнить
+    function freeTextures(keep) {
+      for (const [src, entry] of texCache) {
+        if (keep.includes(src)) continue;
+        entry.promise.then(tex => tex.dispose()).catch(() => {});
+        texCache.delete(src);
+      }
+    }
+
+    // Две сферы: задняя показывает текущую панораму, передняя проявляется поверх при смене
+    let back, front, fade = null;
+    function initSky() {
+      const make = (radius, mat) => {
+        const geo = new THREE.SphereGeometry(radius, 64, 32);
+        geo.scale(-1, 1, 1);
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.rotation.y = -Math.PI / 2;
+        scene.object3D.add(mesh);
+        return mesh;
+      };
+      back = make(500, new THREE.MeshBasicMaterial({ color: 0x000000 }));
+      front = make(490, new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }));
+      front.renderOrder = 1;
+      front.visible = false;
+    }
+    function setMap(mesh, tex) {
+      mesh.material.map = tex;
+      mesh.material.color.set(0xffffff);
+      mesh.material.needsUpdate = true;
+    }
+    async function crossfade(tex) {
+      if (fade) {
+        // Предыдущая смена ещё идёт — завершаем её мгновенно
+        fade.cancel();
+        setMap(back, front.material.map);
+        front.visible = false;
+      }
+      if (!back.material.map) { setMap(back, tex); return; }
+      setMap(front, tex);
+      front.material.opacity = 0;
+      front.visible = true;
+      const tw = fade = tween(450, k => (front.material.opacity = k));
+      const finished = await tw.promise;
+      if (!finished || fade !== tw) return;
+      fade = null;
+      setMap(back, tex);
+      front.visible = false;
+    }
+
+    /* ---------- Переключение панорам ---------- */
+    let token = 0, lastSwitch = 0;
+
+    async function show(i) {
+      index = (i + N) % N;
+      const my = ++token, p = PANORAMAS[index];
+      markActive();
+      updateHud();
+      updateMenuActive();
+      vrToast(`${p.title}\n${index + 1} / ${N}`);
+      history.replaceState(null, '', '#' + (index + 1));
+
+      const hiReady = isReady(p.src);
+      $('spinner').hidden = false;
+      try {
+        // Если лёгкой версии нет (например, без интернета), сразу берём полную
+        const tex = await loadTexture(hiReady ? p.src : p.low).catch(() => loadTexture(p.src));
+        if (my !== token) return;
+        await crossfade(tex);
+      } catch (e) {
+        if (my === token) {
+          $('spinner').hidden = true;
+          loadFailed = true;
+          notice(`Не удалось загрузить панораму «${p.title}». Проверьте подключение к интернету.`, () => show(index));
+          vrToast('Не удалось загрузить панораму\nНажмите курок, чтобы повторить', true);
+        }
+        return;
+      }
+      if (loadFailed) { loadFailed = false; hideNotice(); }
+      // Сначала показали лёгкую версию, теперь подменяем на полное качество
+      if (!hiReady) await upgradeCurrent(my);
+      if (my !== token) return;
+      $('spinner').hidden = true;
+      const nx = PANORAMAS[(index + 1) % N], pv = PANORAMAS[(index - 1 + N) % N];
+      freeTextures([p.src, p.low, nx.src, nx.low]);
+      loadTexture(nx.src).catch(() => {});
+      fetch(pv.low).catch(() => {});   // лёгкая версия предыдущей — на случай шага назад
+    }
+
+    // Подгрузка полного качества для уже показанной панорамы
+    async function upgradeCurrent(my) {
+      const p = PANORAMAS[index];
+      $('spinner').hidden = false;
+      try {
+        const hi = await loadTexture(p.src);
+        if (my === token && !fade) setMap(back, hi);
+      } catch (e) {
+        if (my === token) notice('Не удалось загрузить полное качество этой панорамы.', () => upgradeCurrent(token));
+      }
+      if (my === token) $('spinner').hidden = true;
+    }
+
+    /* ---------- Сообщения об ошибках ---------- */
+    let loadFailed = false, retryFn = null;
+    function notice(text, retry) {
+      $('noticeText').textContent = text;
+      retryFn = retry || null;
+      $('noticeRetry').hidden = !retry;
+      $('notice').hidden = false;
+    }
+    function hideNotice() {
+      $('notice').hidden = true;
+      retryFn = null;
+    }
+    function retry() {
+      const f = retryFn;
+      hideNotice();
+      if (f) f();
+    }
+    $('noticeRetry').addEventListener('click', retry);
+    $('noticeClose').addEventListener('click', hideNotice);
+    window.addEventListener('offline', () => {
+      if (!loadFailed) notice('Нет подключения к интернету. Уже открытые панорамы по-прежнему доступны.');
+    });
+    // Связь вернулась — сами повторяем то, что не загрузилось
+    window.addEventListener('online', () => {
+      if (retryFn) retry(); else hideNotice();
+    });
+
+    // Переключение с кнопок и клавиш: защита от случайного двойного нажатия
+    function userShow(i, hand) {
+      const now = performance.now();
+      if (now - lastSwitch < 400) return;
+      lastSwitch = now;
+      show(i);
+      if (hand) pulse(hand, 0.5, 40);
+    }
+
+    // Кнопка HD: докачивает текущую панораму в полном качестве и подменяет её на месте
+    function updateHdUI() {
+      const on = quality === 'hi';
+      $('hdBtn').classList.toggle('on', on);
+      $('hdBtn').title = on
+        ? 'Высокое качество включено (6144 px). Нажмите, чтобы вернуть обычное'
+        : 'Включить высокое качество (6144 px, файлы примерно вдвое тяжелее)';
+    }
+    $('hdBtn').addEventListener('click', async () => {
+      quality = quality === 'hi' ? 'mid' : 'hi';
+      try { localStorage.setItem('pano-quality', quality); } catch (e) {}
+      updateHdUI();
+      checkOffline();
+      const my = token, p = PANORAMAS[index], nx = PANORAMAS[(index + 1) % N];
+      await upgradeCurrent(my);
+      if (my !== token) return;
+      freeTextures([p.src, p.low, nx.src, nx.low]);
+      loadTexture(nx.src).catch(() => {});
+    });
+    updateHdUI();
+
+    function updateHud() {
+      $('hudTitle').textContent = PANORAMAS[index].title;
+      $('hudNum').textContent = `${index + 1} / ${N}`;
+    }
+
+    window.addEventListener('keydown', e => {
+      if (e.key === 'ArrowRight') userShow(index + 1);
+      if (e.key === 'ArrowLeft') userShow(index - 1);
+    });
+
+    // Ссылка на конкретную панораму: .../#5
+    const hashIndex = () => {
+      const n = parseInt(location.hash.slice(1), 10);
+      return n >= 1 && n <= N ? n - 1 : 0;
+    };
+    window.addEventListener('hashchange', () => { if (hashIndex() !== index) show(hashIndex()); });
+
+    /* ---------- Карусель ---------- */
+    const items = PANORAMAS.map((p, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'item';
+      btn.innerHTML = `<img loading="lazy" alt=""><span></span>`;
+      btn.querySelector('img').src = p.thumb;
+      btn.querySelector('span').textContent = `${i + 1}. ${p.title}`;
+      btn.addEventListener('click', () => show(i));
+      track.appendChild(btn);
+      return btn;
+    });
+    $('prevBtn').addEventListener('click', () => track.scrollBy({ left: -track.clientWidth * 0.8 }));
+    $('nextBtn').addEventListener('click', () => track.scrollBy({ left: track.clientWidth * 0.8 }));
+    // Колесо мыши листает карусель по горизонтали
+    track.addEventListener('wheel', e => {
+      if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { track.scrollLeft += e.deltaY; e.preventDefault(); }
+    }, { passive: false });
+
+    function markActive() {
+      items.forEach((el, i) => el.classList.toggle('active', i === index));
+      const el = items[index];
+      track.scrollTo({ left: el.offsetLeft - (track.clientWidth - el.offsetWidth) / 2 });
+    }
+
+    /* ---------- VR: вибрация, подпись, меню ---------- */
+    function pulse(hand, intensity = 0.4, ms = 30) {
+      try {
+        const tc = hand.components['tracked-controls'];
+        const act = tc && tc.controller && tc.controller.gamepad && tc.controller.gamepad.hapticActuators;
+        if (act && act[0]) act[0].pulse(intensity, ms);
+      } catch (e) {}
+    }
+
+    let toastTimer = null, toastTween = null;
+    // persist — не гасить подпись автоматически (для сообщений об ошибке)
+    function vrToast(text, persist = false) {
+      if (!scene.is('vr-mode')) return;
+      const mat = toast.components['canvas-text'].material;
+      // Подпись всегда поверх всего, в том числе поверх меню
+      mat.depthTest = false;
+      toast.getObject3D('mesh').renderOrder = 10;
+      toast.setAttribute('canvas-text', 'text', text);
+      if (toastTween) toastTween.cancel();
+      mat.opacity = 1;
+      toast.object3D.visible = true;
+      clearTimeout(toastTimer);
+      if (persist) return;
+      toastTimer = setTimeout(() => {
+        toastTween = tween(600, k => (mat.opacity = 1 - k));
+        toastTween.promise.then(done => { if (done) toast.object3D.visible = false; });
+      }, 2200);
+    }
+
+    // Сетка 5×3 с миниатюрами, внизу кнопка «Закрыть»
+    const COLS = 5, TW = 0.34, TH = 0.2125, GX = 0.38, GY = 0.33;
+    let menuOpen = false, menuFrame = null;
+    function el(tag, attrs, parent = menu) {
+      const e = document.createElement(tag);
+      for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+      parent.appendChild(e);
+      return e;
+    }
+    function buildMenu() {
+      el('a-entity', { 'canvas-text': 'width: 2.1; height: 1.42; bg: rgba(15,15,22,0.88); radius: 40', position: '0 -0.04 -0.02' });
+      el('a-entity', { 'canvas-text': 'text: Выбор панорамы; width: 1.2; height: 0.1; fontSize: 56', position: '0 0.58 0' });
+      menuFrame = el('a-entity', { 'canvas-text': `width: ${TW + 0.03}; height: ${TH + 0.03}; bg: #fff; radius: 12`, position: '0 0 -0.01' });
+      PANORAMAS.forEach((p, i) => {
+        const x = (i % COLS - (COLS - 1) / 2) * GX, y = 0.33 - Math.floor(i / COLS) * GY;
+        const img = el('a-image', { src: p.thumb, width: TW, height: TH, position: `${x} ${y} 0`, class: 'vr-btn' });
+        img.addEventListener('click', () => { show(i); closeMenu(); });
+        el('a-entity', { 'canvas-text': `text: ${p.title}; width: ${TW}; height: 0.05; fontSize: 26`, position: `${x} ${y - TH / 2 - 0.035} 0` });
+      });
+      const close = el('a-entity', { 'canvas-text': 'text: Закрыть; width: 0.5; height: 0.1; fontSize: 40; bg: rgba(255,255,255,0.15)', position: '0 -0.6 0', class: 'vr-btn' });
+      close.addEventListener('click', closeMenu);
+      // Подсветка под лучом и лёгкая вибрация
+      menu.querySelectorAll('.vr-btn').forEach(b => {
+        b.addEventListener('mouseenter', e => { b.object3D.scale.setScalar(1.08); if (e.detail.cursorEl) pulse(e.detail.cursorEl, 0.2, 15); });
+        b.addEventListener('mouseleave', () => b.object3D.scale.setScalar(1));
+      });
+      updateMenuActive();
+    }
+    function updateMenuActive() {
+      if (!menuFrame) return;
+      const x = (index % COLS - (COLS - 1) / 2) * GX, y = 0.33 - Math.floor(index / COLS) * GY;
+      menuFrame.setAttribute('position', { x, y, z: -0.01 });
+    }
+    function setRays(on) {
+      hands.forEach(h => h.setAttribute('raycaster', { enabled: on, showLine: on }));
+    }
+    function openMenu(hand) {
+      // Ставим меню перед пользователем, куда бы он ни смотрел (в VR положение головы есть только у камеры three.js)
+      const camObj = scene.camera, pos = new THREE.Vector3(), quat = new THREE.Quaternion();
+      camObj.getWorldPosition(pos);
+      camObj.getWorldQuaternion(quat);
+      const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(quat);
+      dir.y = 0;
+      if (dir.lengthSq() < 1e-4) dir.set(0, 0, -1);
+      dir.normalize();
+      menu.object3D.position.set(pos.x + dir.x * 1.5, pos.y - 0.1, pos.z + dir.z * 1.5);
+      menu.object3D.rotation.set(0, Math.atan2(-dir.x, -dir.z), 0);
+      menu.object3D.visible = true;
+      menuOpen = true;
+      setRays(true);
+      if (hand) pulse(hand, 0.3, 30);
+    }
+    function closeMenu() {
+      if (!menuOpen) return;
+      menuOpen = false;
+      menu.object3D.visible = false;
+      setRays(false);
+    }
+
+    // Курок/A/Y — дальше, B/X — назад (или закрыть меню), боковая кнопка/меню — открыть выбор панорам
+    hands.forEach(hand => {
+      // Если панорама не загрузилась, курок/A/Y повторяют попытку
+      const nav = d => () => {
+        if (menuOpen) return;
+        if (loadFailed && retryFn) { pulse(hand, 0.5, 40); retry(); return; }
+        userShow(index + d, hand);
+      };
+      const goBack = () => (menuOpen ? closeMenu() : userShow(index - 1, hand));
+      const toggle = () => (menuOpen ? closeMenu() : openMenu(hand));
+      hand.addEventListener('triggerdown', nav(1));
+      hand.addEventListener('abuttondown', nav(1));
+      hand.addEventListener('ybuttondown', nav(1));
+      hand.addEventListener('bbuttondown', goBack);
+      hand.addEventListener('xbuttondown', goBack);
+      hand.addEventListener('gripdown', toggle);
+      hand.addEventListener('menudown', toggle);
+    });
+
+    /* ---------- ПК и телефон: гироскоп, приближение, полный экран ---------- */
+    let gyroOn = true;
+    window.autoRotateAllowed = () => !(isTouch && gyroOn);
+    if (isTouch && !isHeadset && 'DeviceOrientationEvent' in window) {
+      $('gyroBtn').hidden = false;
+      $('gyroBtn').addEventListener('click', async () => {
+        const next = !gyroOn;
+        if (next && typeof DeviceOrientationEvent.requestPermission === 'function') {
+          try { if (await DeviceOrientationEvent.requestPermission() !== 'granted') return; } catch (e) { return; }
+        }
+        gyroOn = next;
+        cam.setAttribute('look-controls', 'magicWindowTrackingEnabled', gyroOn);
+        $('gyroBtn').classList.toggle('off', !gyroOn);
+      });
+    }
+
+    if (document.fullscreenEnabled && !isHeadset) {
+      $('fsBtn').hidden = false;
+      $('fsBtn').addEventListener('click', () => {
+        if (document.fullscreenElement) document.exitFullscreen();
+        else document.documentElement.requestFullscreen().catch(() => {});
+      });
+      document.addEventListener('fullscreenchange', () => {
+        $('fsBtn').textContent = document.fullscreenElement ? '✕' : '⛶';
+      });
+    }
+
+    function setupZoom() {
+      const canvas = scene.canvas;
+      const setFov = f => cam.setAttribute('camera', 'fov', Math.max(30, Math.min(100, f)));
+      const fov = () => cam.getAttribute('camera').fov;
+      canvas.addEventListener('wheel', e => { e.preventDefault(); setFov(fov() + e.deltaY * 0.05); }, { passive: false });
+      let pinch = null;
+      const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+      canvas.addEventListener('touchstart', e => { if (e.touches.length === 2) pinch = { d: dist(e.touches), fov: fov() }; }, { passive: true });
+      canvas.addEventListener('touchmove', e => { if (pinch && e.touches.length === 2) setFov(pinch.fov * pinch.d / dist(e.touches)); }, { passive: true });
+      canvas.addEventListener('touchend', e => { if (e.touches.length < 2) pinch = null; }, { passive: true });
+    }
+
+    /* ---------- Загрузка ---------- */
+    // Ждём только необходимое: сцену, первую панораму в полном качестве и лёгкую версию следующей.
+    // Вес: сцена 1, лёгкая версия 1, полное качество 8
+    const TOTAL = 10;
+    let loaded = 0;
+    function progress(w) {
+      loaded += w;
+      const pct = Math.round(loaded / TOTAL * 100);
+      $('loaderFill').style.width = pct + '%';
+      $('loaderText').textContent = `Загрузка панорам… ${pct}%`;
+    }
+    async function start() {
+      // Если загрузка затянулась — подсказываем, что всё в порядке, просто медленно
+      const slow = setTimeout(() => ($('loaderHint').hidden = false), 12000);
+      await sceneLoaded;
+      progress(1);
+      initSky();
+      buildMenu();
+      setupZoom();
+      await loadFirst();
+      clearTimeout(slow);
+    }
+    async function loadFirst() {
+      const first = hashIndex(), second = (first + 1) % N, p = PANORAMAS[first];
+      $('loaderError').hidden = true;
+      $('loaderHint').hidden = true;
+      $('loaderBox').hidden = false;
+      // Полное качество, а если не вышло — хотя бы лёгкая версия
+      const [ok] = await Promise.all([
+        loadTexture(p.src).catch(() => loadTexture(p.low)).then(() => true, () => false),
+        loaded < 2 ? fetch(PANORAMAS[second].low).then(r => r.blob()).catch(() => {}).then(() => progress(1)) : null,
+      ]);
+      if (!ok) {
+        $('loaderBox').hidden = true;
+        $('loaderError').hidden = false;
+        return;
+      }
+      progress(TOTAL - loaded);
+      await show(first);
+      $('loader').classList.add('done');
+      checkOffline();
+    }
+    $('loaderRetry').addEventListener('click', loadFirst);
+    window.addEventListener('online', () => { if (!$('loaderError').hidden) loadFirst(); });
+
+    // Офлайн: просмотренные панорамы сохраняются сами, а все сразу — только по кнопке ⬇
+    if ('serviceWorker' in navigator && window.isSecureContext) {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
+    const offlineFiles = () => PANORAMAS.flatMap(p => [p.low, p.src]);
+    async function checkOffline() {
+      if (!('caches' in window) || !window.isSecureContext) return;
+      $('dlBtn').hidden = false;
+      const cache = await caches.open(CACHE);
+      const have = await Promise.all(offlineFiles().map(f => cache.match(f)));
+      if (have.every(Boolean)) setDl('✓', 'Все панорамы сохранены для работы без интернета');
+      else if (!downloading) setDl('⬇', 'Скачать все панорамы для работы без интернета');
+    }
+    function setDl(text, title) {
+      $('dlBtn').textContent = text;
+      $('dlBtn').title = title;
+      $('dlBtn').classList.toggle('small', text.length > 2);
+    }
+    let downloading = false;
+    $('dlBtn').addEventListener('click', async () => {
+      if (downloading) return;
+      downloading = true;
+      const cache = await caches.open(CACHE), files = offlineFiles();
+      let done = 0, failed = 0;
+      for (const f of files) {
+        if (!(await cache.match(f))) await cache.add(f).catch(() => failed++);
+        setDl(Math.round(++done / files.length * 100) + '%', 'Сохранение панорам…');
+      }
+      downloading = false;
+      if (failed) setDl('⬇', 'Не всё скачалось — нажмите ещё раз');
+      else setDl('✓', 'Все панорамы сохранены для работы без интернета');
+    });
+
+    start();
+  </script>
+</body>
+</html>

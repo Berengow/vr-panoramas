@@ -1,0 +1,10 @@
+# Локальные настройки редактора и Claude
+.claude/
+
+# Исходная фотография студии — не публикуем в открытом репозитории
+panoramas/studio_original.jpg
+
+# Системный мусор
+Thumbs.db
+desktop.ini
+.DS_Store
