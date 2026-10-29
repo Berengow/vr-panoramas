@@ -1,7 +1,7 @@
 // Офлайн-режим: приложение и миниатюры сохраняются при установке, панорамы — по мере просмотра
 // (или все сразу по кнопке ⬇). Если заменили файлы, увеличьте номер версии — и в index.html тоже.
-const CACHE = 'vr-pano-v2';
-const N = 15;
+const CACHE = 'vr-pano-v6';
+const N = 5;
 const SHELL = [
   './', 'index.html', 'vendor/aframe.min.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png',
@@ -23,11 +23,17 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const req = event.request;
   if (req.method !== 'GET') return;
-  // Страницу берём из сети, чтобы обновления приложения применялись сразу; без интернета — из кэша
+  // Страницу приложения берём из сети, чтобы обновления применялись сразу; без интернета — из кэша.
+  // Другие страницы рядом (например, тестовые) не трогаем
   if (req.mode === 'navigate') {
+    const path = new URL(req.url).pathname;
+    const scopePath = new URL(self.registration.scope).pathname;
+    if (path !== scopePath && path !== scopePath + 'index.html') return;
     event.respondWith(fetch(req).then(res => {
-      const copy = res.clone();
-      caches.open(CACHE).then(c => c.put('index.html', copy));
+      if (res.ok) {
+        const copy = res.clone();
+        caches.open(CACHE).then(c => c.put('index.html', copy));
+      }
       return res;
     }).catch(() => caches.match('index.html')));
     return;

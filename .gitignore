@@ -8,3 +8,6 @@ panoramas/studio_original.jpg
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# Тестовый стенд с эмулятором VR — только для локальной проверки
+vr-test.html
